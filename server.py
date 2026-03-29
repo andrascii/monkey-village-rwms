@@ -146,8 +146,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
         self.__config = config
         self.__logger = logging.getLogger(self.__class__.__name__)
 
-        self.__logger.info("Remnawave base url: %s", self.__config.base_url)
-        self.__logger.info("Remnawave token: %s", self.__config.token)
+        self.__logger.info("remnawave base url: %s", self.__config.base_url)
+        self.__logger.info("remnawave token: %s", self.__config.token)
 
         self.__remnawave = RemnawaveSDK(
             base_url=self.__config.base_url, token=self.__config.token
@@ -181,7 +181,7 @@ class Server(rwmanager_pb2_grpc.RwManager):
         self, request: proto.AddUserRequest, context: grpc.aio.ServicerContext
     ) -> proto.UserResponse:
         try:
-            self.__logger.info(f"Add user {request.username}")
+            self.__logger.info(f"adding user {request.username}")
 
             if request.status == proto.UserStatus.ACTIVE:
                 status = UserStatus.ACTIVE
@@ -249,6 +249,21 @@ class Server(rwmanager_pb2_grpc.RwManager):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"add user operation failed: {e}")
             return proto.UserResponse()
+        
+    async def DeleteUser(
+        self,
+        request: proto.DeleteUserRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> proto.DeleteUserResponse:
+        try:
+            self.__logger.info(f"delete user {request.uuid}")
+            response = await self.__remnawave.users.delete_user(request.uuid)
+            return proto.DeleteUserResponse(is_deleted=response.is_deleted)
+        except ApiError as e:
+            self.__logger.error(f"delete user operation failed: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"delete user operation failed: {e}")
+            return proto.DeleteUserResponse(is_deleted=False)
 
     async def UpdateUser(
         self,

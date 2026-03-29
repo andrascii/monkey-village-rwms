@@ -4,3 +4,4 @@ venv
 log
 *.log
 *.tar
+.DS_Store
