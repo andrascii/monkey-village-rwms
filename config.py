@@ -1,10 +1,13 @@
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 RW_MS_LOG_LEVEL = "RW_MS_LOG_LEVEL"
 RW_MS_BASE_URL = "RW_MS_BASE_URL"
 RW_MS_TOKEN = "RW_MS_TOKEN"
 RW_MS_GRPC_PORT = "RW_MS_GRPC_PORT"
-
 
 def get_required_env_var(var_name: str) -> str:
     value = os.getenv(var_name)
