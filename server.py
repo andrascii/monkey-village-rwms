@@ -98,8 +98,13 @@ def dto_to_proto_user(user: UserResponseDto) -> proto.UserResponse:
         username=user.username,
         used_traffic_bytes=user.used_traffic_bytes,
         lifetime_used_traffic_bytes=user.lifetime_used_traffic_bytes,
+        # В remnawave SDK >=2.8.0 traffic_limit_bytes стал float, а в proto это
+        # int64 — без явного int() присвоение падает с TypeError (инцидент
+        # 2026-07-07). Каст корректен и для int из SDK <=2.7.x.
         traffic_limit_bytes=(
-            user.traffic_limit_bytes if user.traffic_limit_bytes is not None else None
+            int(user.traffic_limit_bytes)
+            if user.traffic_limit_bytes is not None
+            else None
         ),
         sub_last_user_agent=(
             user.sub_last_user_agent if user.sub_last_user_agent else None
