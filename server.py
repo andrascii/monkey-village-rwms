@@ -20,7 +20,7 @@ from remnawave.models import (
     UpdateUserRequestDto,
     UserResponseDto,
     ActiveInternalSquadDto,
-    HappCrypto
+    HappCrypto,
 )
 
 from config import Config
@@ -73,16 +73,19 @@ def RemnawaveTrafficLimitStrategyToProto(
     else:
         raise ValueError(f"Invalid traffic limit strategy: {strategy}")
 
-def dto_to_proto_active_squad(squad: ActiveInternalSquadDto) -> proto.ActiveInternalSquad:
+
+def dto_to_proto_active_squad(
+    squad: ActiveInternalSquadDto,
+) -> proto.ActiveInternalSquad:
     return proto.ActiveInternalSquad(
         uuid=str(squad.uuid),
         name=squad.name,
     )
 
+
 def dto_to_proto_happ(h: HappCrypto) -> proto.HappCrypto:
-    return proto.HappCrypto(
-        crypto_link=h.crypto_link
-    )
+    return proto.HappCrypto(crypto_link=h.crypto_link)
+
 
 def dto_to_proto_user(user: UserResponseDto) -> proto.UserResponse:
     """
@@ -121,8 +124,7 @@ def dto_to_proto_user(user: UserResponseDto) -> proto.UserResponse:
             user.last_trigger_threshold if user.last_trigger_threshold else None
         ),
         active_internal_squads=[
-            dto_to_proto_active_squad(s)
-            for s in user.active_internal_squads
+            dto_to_proto_active_squad(s) for s in user.active_internal_squads
         ],
         happ=dto_to_proto_happ(user.happ),
         created_at=to_ts(user.created_at),
@@ -221,7 +223,9 @@ class Server(rwmanager_pb2_grpc.RwManager):
                 CreateUserRequestDto(
                     username=request.username,
                     email=request.email if request.HasField("email") else None,
-                    telegram_id=request.telegram_id if request.HasField("telegram_id") else None,
+                    telegram_id=(
+                        request.telegram_id if request.HasField("telegram_id") else None
+                    ),
                     expire_at=from_proto_timestamp(request.expire_at),
                     created_at=(
                         from_proto_timestamp(request.created_at)
@@ -230,26 +234,34 @@ class Server(rwmanager_pb2_grpc.RwManager):
                     ),
                     status=status,
                     traffic_limit_strategy=traffic_limit_strategy,
-                    description=request.description if request.HasField("description") else None,
+                    description=(
+                        request.description if request.HasField("description") else None
+                    ),
                     tag=request.tag if request.HasField("tag") else None,
-                    hwidDeviceLimit=request.hwid_device_limit if request.HasField("hwid_device_limit") else None,
+                    hwidDeviceLimit=(
+                        request.hwid_device_limit
+                        if request.HasField("hwid_device_limit")
+                        else None
+                    ),
                     last_traffic_reset_at=(
                         from_proto_timestamp(request.last_traffic_reset_at)
                         if request.last_traffic_reset_at
                         else None
                     ),
-                    active_internal_squads=list(request.active_internal_squads)
+                    active_internal_squads=list(request.active_internal_squads),
                 )
             )
 
-            self.__logger.info(f"user created: {created_user.model_dump_json(by_alias=True)}")
+            self.__logger.info(
+                f"user created: {created_user.model_dump_json(by_alias=True)}"
+            )
             return dto_to_proto_user(created_user)
         except ApiError as e:
             self.__logger.error(f"add user operation failed: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"add user operation failed: {e}")
             return proto.UserResponse()
-        
+
     async def DeleteUser(
         self,
         request: proto.DeleteUserRequest,
@@ -338,26 +350,39 @@ class Server(rwmanager_pb2_grpc.RwManager):
                         if request.HasField("hwid_device_limit")
                         else None
                     ),
-                    active_internal_squads=list(request.active_internal_squads)
+                    # У repeated-полей proto3 нет признака "не задано": пустой список
+                    # означает, что вызывающий сквады не передал. Передаём None, чтобы
+                    # exclude_none убрал поле из PATCH и панель не стёрла сквады.
+                    # Стереть все сквады через UpdateUser нельзя (и не требуется).
+                    active_internal_squads=(
+                        list(request.active_internal_squads)
+                        if request.active_internal_squads
+                        else None
+                    ),
                 )
             )
 
-            self.__logger.info(f"user updated: {updated_user.model_dump_json(by_alias=True)}")
+            self.__logger.info(
+                f"user updated: {updated_user.model_dump_json(by_alias=True)}"
+            )
             return dto_to_proto_user(updated_user)
         except ApiError as e:
             self.__logger.error(f"update user operation failed: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"update user operation failed: {e}")
             return proto.UserResponse()
-        
-    async def GetAllUsers(self, request: proto.GetAllUsersRequest, context: grpc.aio.ServicerContext) -> proto.GetAllUsersReply:
+
+    async def GetAllUsers(
+        self, request: proto.GetAllUsersRequest, context: grpc.aio.ServicerContext
+    ) -> proto.GetAllUsersReply:
         try:
-            all_users = await self.__remnawave.users.get_all_users(request.offset, request.count)
+            all_users = await self.__remnawave.users.get_all_users(
+                request.offset, request.count
+            )
             response = proto.GetAllUsersReply(total=all_users.total)
-        
+
             proto_user_list: list[proto.UserResponse] = [
-                dto_to_proto_user(user)
-                for user in all_users.users
+                dto_to_proto_user(user) for user in all_users.users
             ]
 
             response.users.extend(proto_user_list)
@@ -368,7 +393,9 @@ class Server(rwmanager_pb2_grpc.RwManager):
             context.set_details(f"failed to get all users: {e}")
             return proto.GetAllUsersReply()
 
-    async def GetInbounds(self, request: proto.Empty, context: grpc.aio.ServicerContext) -> proto.GetInboundsResponse:
+    async def GetInbounds(
+        self, request: proto.Empty, context: grpc.aio.ServicerContext
+    ) -> proto.GetInboundsResponse:
         try:
             inbounds = await self.__remnawave.inbounds.get_inbounds()
             return proto.GetInboundsResponse(inbounds=inbounds)
