@@ -1,7 +1,14 @@
-remnawave
-pytz
-grpcio
-grpcio-tools
-black
-python-dotenv
-pytest
+# Все версии запинены (инцидент 2026-07-07: незапиненный remnawave
+# притянул 2.8.0 с breaking change, см. ниже). Обновлять версии только
+# осознанно, с прогоном тестов, а не через пересборку Docker-образа.
+
+# remnawave запинен: в 2.8.0 traffic_limit_bytes в моделях ответа стал float,
+# что ломает конвертацию в protobuf int64 (TypeError) во всех Get*-методах.
+# Перед обновлением версии прогнать тесты и проверить типы полей UserResponseDto.
+remnawave==2.7.1
+pytz==2026.2
+grpcio==1.81.1
+grpcio-tools==1.81.1
+black==26.5.1
+python-dotenv==1.2.2
+pytest==9.1.1
