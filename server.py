@@ -25,6 +25,9 @@ from remnawave.models import (
 
 from config import Config
 
+# Формат дат, который принимают эндпоинты /api/bandwidth-stats/* панели
+STATS_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S.000Z"
+
 
 def from_proto_timestamp(ts: Timestamp) -> datetime:
     return ts.ToDatetime()
@@ -409,3 +412,63 @@ class Server(rwmanager_pb2_grpc.RwManager):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"failed to get inbounds: {e}")
             return proto.GetInboundsResponse()
+
+    async def GetNodes(
+        self, request: proto.Empty, context: grpc.aio.ServicerContext
+    ) -> proto.GetNodesResponse:
+        try:
+            nodes = await self.__remnawave.nodes.get_all_nodes()
+            return proto.GetNodesResponse(
+                nodes=[
+                    proto.Node(
+                        uuid=str(node.uuid),
+                        name=node.name,
+                        address=node.address,
+                        is_connected=node.is_connected,
+                        is_disabled=node.is_disabled,
+                        country_code=node.country_code,
+                    )
+                    for node in nodes
+                ]
+            )
+        except ApiError as e:
+            self.__logger.error(f"failed to get nodes: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"failed to get nodes: {e}")
+            return proto.GetNodesResponse()
+
+    async def GetNodeUsersUsage(
+        self,
+        request: proto.GetNodeUsersUsageRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> proto.GetNodeUsersUsageResponse:
+        try:
+            self.__logger.info(
+                "get node users usage: node=%s start=%s end=%s",
+                request.node_uuid,
+                request.start.ToDatetime(),
+                request.end.ToDatetime(),
+            )
+            rows = (
+                await self.__remnawave.bandwidthstats.get_node_users_usage_legacy_stats(
+                    uuid=request.node_uuid,
+                    start=request.start.ToDatetime().strftime(STATS_DATE_FORMAT),
+                    end=request.end.ToDatetime().strftime(STATS_DATE_FORMAT),
+                )
+            )
+            return proto.GetNodeUsersUsageResponse(
+                items=[
+                    proto.NodeUserUsage(
+                        user_uuid=str(row.user_uuid),
+                        username=row.username,
+                        total_bytes=row.total,
+                        date=row.date,
+                    )
+                    for row in rows
+                ]
+            )
+        except ApiError as e:
+            self.__logger.error(f"failed to get node users usage: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"failed to get node users usage: {e}")
+            return proto.GetNodeUsersUsageResponse()

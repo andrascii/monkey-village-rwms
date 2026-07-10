@@ -234,7 +234,7 @@ class DeleteUserResponse(_message.Message):
     __slots__ = ("is_deleted",)
     IS_DELETED_FIELD_NUMBER: _ClassVar[int]
     is_deleted: bool
-    def __init__(self, is_deleted: bool = ...) -> None: ...
+    def __init__(self, is_deleted: _Optional[bool] = ...) -> None: ...
 
 class Inbound(_message.Message):
     __slots__ = ("uuid", "tag", "type", "port", "network", "security")
@@ -261,3 +261,53 @@ class GetInboundsResponse(_message.Message):
 class Empty(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class Node(_message.Message):
+    __slots__ = ("uuid", "name", "address", "is_connected", "is_disabled", "country_code")
+    UUID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    IS_CONNECTED_FIELD_NUMBER: _ClassVar[int]
+    IS_DISABLED_FIELD_NUMBER: _ClassVar[int]
+    COUNTRY_CODE_FIELD_NUMBER: _ClassVar[int]
+    uuid: str
+    name: str
+    address: str
+    is_connected: bool
+    is_disabled: bool
+    country_code: str
+    def __init__(self, uuid: _Optional[str] = ..., name: _Optional[str] = ..., address: _Optional[str] = ..., is_connected: _Optional[bool] = ..., is_disabled: _Optional[bool] = ..., country_code: _Optional[str] = ...) -> None: ...
+
+class GetNodesResponse(_message.Message):
+    __slots__ = ("nodes",)
+    NODES_FIELD_NUMBER: _ClassVar[int]
+    nodes: _containers.RepeatedCompositeFieldContainer[Node]
+    def __init__(self, nodes: _Optional[_Iterable[_Union[Node, _Mapping]]] = ...) -> None: ...
+
+class GetNodeUsersUsageRequest(_message.Message):
+    __slots__ = ("node_uuid", "start", "end")
+    NODE_UUID_FIELD_NUMBER: _ClassVar[int]
+    START_FIELD_NUMBER: _ClassVar[int]
+    END_FIELD_NUMBER: _ClassVar[int]
+    node_uuid: str
+    start: _timestamp_pb2.Timestamp
+    end: _timestamp_pb2.Timestamp
+    def __init__(self, node_uuid: _Optional[str] = ..., start: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., end: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class NodeUserUsage(_message.Message):
+    __slots__ = ("user_uuid", "username", "total_bytes", "date")
+    USER_UUID_FIELD_NUMBER: _ClassVar[int]
+    USERNAME_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_BYTES_FIELD_NUMBER: _ClassVar[int]
+    DATE_FIELD_NUMBER: _ClassVar[int]
+    user_uuid: str
+    username: str
+    total_bytes: int
+    date: str
+    def __init__(self, user_uuid: _Optional[str] = ..., username: _Optional[str] = ..., total_bytes: _Optional[int] = ..., date: _Optional[str] = ...) -> None: ...
+
+class GetNodeUsersUsageResponse(_message.Message):
+    __slots__ = ("items",)
+    ITEMS_FIELD_NUMBER: _ClassVar[int]
+    items: _containers.RepeatedCompositeFieldContainer[NodeUserUsage]
+    def __init__(self, items: _Optional[_Iterable[_Union[NodeUserUsage, _Mapping]]] = ...) -> None: ...

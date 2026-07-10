@@ -15,6 +15,21 @@ RW_MS_BASE_URL=https://panel.example.com
 RW_MS_TOKEN=...
 ```
 
+## Статистика трафика нод (GetNodes / GetNodeUsersUsage)
+
+Read-only RPC для поиска аномального потребления трафика (расшаренных
+подписок), используются вкладкой «Трафик нод» в админке сайта:
+
+- `GetNodes(Empty)` — список нод панели (uuid, имя, адрес, connected/disabled,
+  код страны);
+- `GetNodeUsersUsage(node_uuid, start, end)` — потрафиковая разбивка по
+  каждому пользователю ноды за период (строки «пользователь × день»,
+  проксирует `GET /api/bandwidth-stats/nodes/{uuid}/users/legacy`).
+
+Оба метода ничего не изменяют ни в панели, ни в БД. На длинных периодах
+(30+ дней) панель может отвечать HTTP 500 на тяжёлые ноды — потребитель
+должен быть готов к INTERNAL-ошибке.
+
 ## Семантика UpdateUser
 
 Опциональные скалярные поля (`status`, `email`, `expire_at`, `telegram_id` и

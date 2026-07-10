@@ -5,7 +5,7 @@ import warnings
 
 import rwmanager_pb2 as rwmanager__pb2
 
-GRPC_GENERATED_VERSION = '1.76.0'
+GRPC_GENERATED_VERSION = '1.81.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -25,7 +25,7 @@ if _version_not_supported:
     )
 
 
-class RwManagerStub(object):
+class RwManagerStub:
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -69,9 +69,19 @@ class RwManagerStub(object):
                 request_serializer=rwmanager__pb2.Empty.SerializeToString,
                 response_deserializer=rwmanager__pb2.GetInboundsResponse.FromString,
                 _registered_method=True)
+        self.GetNodes = channel.unary_unary(
+                '/rwmanager.RwManager/GetNodes',
+                request_serializer=rwmanager__pb2.Empty.SerializeToString,
+                response_deserializer=rwmanager__pb2.GetNodesResponse.FromString,
+                _registered_method=True)
+        self.GetNodeUsersUsage = channel.unary_unary(
+                '/rwmanager.RwManager/GetNodeUsersUsage',
+                request_serializer=rwmanager__pb2.GetNodeUsersUsageRequest.SerializeToString,
+                response_deserializer=rwmanager__pb2.GetNodeUsersUsageResponse.FromString,
+                _registered_method=True)
 
 
-class RwManagerServicer(object):
+class RwManagerServicer:
     """Missing associated documentation comment in .proto file."""
 
     def GetUserByUuid(self, request, context):
@@ -116,6 +126,19 @@ class RwManagerServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetNodes(self, request, context):
+        """Read-only статистика для поиска аномального потребления трафика
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetNodeUsersUsage(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_RwManagerServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -154,6 +177,16 @@ def add_RwManagerServicer_to_server(servicer, server):
                     request_deserializer=rwmanager__pb2.Empty.FromString,
                     response_serializer=rwmanager__pb2.GetInboundsResponse.SerializeToString,
             ),
+            'GetNodes': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetNodes,
+                    request_deserializer=rwmanager__pb2.Empty.FromString,
+                    response_serializer=rwmanager__pb2.GetNodesResponse.SerializeToString,
+            ),
+            'GetNodeUsersUsage': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetNodeUsersUsage,
+                    request_deserializer=rwmanager__pb2.GetNodeUsersUsageRequest.FromString,
+                    response_serializer=rwmanager__pb2.GetNodeUsersUsageResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'rwmanager.RwManager', rpc_method_handlers)
@@ -162,7 +195,7 @@ def add_RwManagerServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class RwManager(object):
+class RwManager:
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -344,6 +377,60 @@ class RwManager(object):
             '/rwmanager.RwManager/GetInbounds',
             rwmanager__pb2.Empty.SerializeToString,
             rwmanager__pb2.GetInboundsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetNodes(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/rwmanager.RwManager/GetNodes',
+            rwmanager__pb2.Empty.SerializeToString,
+            rwmanager__pb2.GetNodesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetNodeUsersUsage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/rwmanager.RwManager/GetNodeUsersUsage',
+            rwmanager__pb2.GetNodeUsersUsageRequest.SerializeToString,
+            rwmanager__pb2.GetNodeUsersUsageResponse.FromString,
             options,
             channel_credentials,
             insecure,
