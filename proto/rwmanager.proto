@@ -86,6 +86,12 @@ message GetUserByUsernameRequest {
   string username = 1;
 }
 
+// Числовой ID пользователя в панели Remnawave (колонка ID в UI). Именно он
+// пишется в поле email access-лога xray, поэтому ip-guard оперирует им.
+message GetUserByIdRequest {
+  int64 id = 1;
+}
+
 message AddUserRequest {
   string username = 1;
   optional string email = 2;
@@ -183,6 +189,7 @@ message GetNodeUsersUsageResponse {
 service RwManager {
   rpc GetUserByUuid(GetUserByUuidRequest) returns (UserResponse) {}
   rpc GetUserByUsername(GetUserByUsernameRequest) returns (UserResponse) {}
+  rpc GetUserById(GetUserByIdRequest) returns (UserResponse) {}
   rpc AddUser(AddUserRequest) returns (UserResponse) {}
   rpc UpdateUser(UpdateUserRequest) returns (UserResponse) {}
   rpc GetAllUsers(GetAllUsersRequest) returns (GetAllUsersReply) {}

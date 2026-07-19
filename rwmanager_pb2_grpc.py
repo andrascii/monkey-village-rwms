@@ -44,6 +44,11 @@ class RwManagerStub:
                 request_serializer=rwmanager__pb2.GetUserByUsernameRequest.SerializeToString,
                 response_deserializer=rwmanager__pb2.UserResponse.FromString,
                 _registered_method=True)
+        self.GetUserById = channel.unary_unary(
+                '/rwmanager.RwManager/GetUserById',
+                request_serializer=rwmanager__pb2.GetUserByIdRequest.SerializeToString,
+                response_deserializer=rwmanager__pb2.UserResponse.FromString,
+                _registered_method=True)
         self.AddUser = channel.unary_unary(
                 '/rwmanager.RwManager/AddUser',
                 request_serializer=rwmanager__pb2.AddUserRequest.SerializeToString,
@@ -91,6 +96,12 @@ class RwManagerServicer:
         raise NotImplementedError('Method not implemented!')
 
     def GetUserByUsername(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetUserById(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -150,6 +161,11 @@ def add_RwManagerServicer_to_server(servicer, server):
             'GetUserByUsername': grpc.unary_unary_rpc_method_handler(
                     servicer.GetUserByUsername,
                     request_deserializer=rwmanager__pb2.GetUserByUsernameRequest.FromString,
+                    response_serializer=rwmanager__pb2.UserResponse.SerializeToString,
+            ),
+            'GetUserById': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetUserById,
+                    request_deserializer=rwmanager__pb2.GetUserByIdRequest.FromString,
                     response_serializer=rwmanager__pb2.UserResponse.SerializeToString,
             ),
             'AddUser': grpc.unary_unary_rpc_method_handler(
@@ -241,6 +257,33 @@ class RwManager:
             target,
             '/rwmanager.RwManager/GetUserByUsername',
             rwmanager__pb2.GetUserByUsernameRequest.SerializeToString,
+            rwmanager__pb2.UserResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetUserById(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/rwmanager.RwManager/GetUserById',
+            rwmanager__pb2.GetUserByIdRequest.SerializeToString,
             rwmanager__pb2.UserResponse.FromString,
             options,
             channel_credentials,

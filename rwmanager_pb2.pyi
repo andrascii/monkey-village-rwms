@@ -152,6 +152,12 @@ class GetUserByUsernameRequest(_message.Message):
     username: str
     def __init__(self, username: _Optional[str] = ...) -> None: ...
 
+class GetUserByIdRequest(_message.Message):
+    __slots__ = ("id",)
+    ID_FIELD_NUMBER: _ClassVar[int]
+    id: int
+    def __init__(self, id: _Optional[int] = ...) -> None: ...
+
 class AddUserRequest(_message.Message):
     __slots__ = ("username", "email", "telegram_id", "expire_at", "created_at", "last_traffic_reset_at", "active_internal_squads", "status", "traffic_limit_strategy", "description", "tag", "hwid_device_limit")
     USERNAME_FIELD_NUMBER: _ClassVar[int]

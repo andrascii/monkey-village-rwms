@@ -187,6 +187,18 @@ class Server(rwmanager_pb2_grpc.RwManager):
             context.set_details(f"failed to get user by username: {e}")
             return proto.UserResponse()
 
+    async def GetUserById(
+        self, request: proto.GetUserByIdRequest, context: grpc.aio.ServicerContext
+    ) -> proto.UserResponse:
+        try:
+            user = await self.__remnawave.users.get_user_by_id(str(request.id))
+            return dto_to_proto_user(user)
+        except ApiError as e:
+            self.__logger.error(f"failed to get user by id: {e}")
+            context.set_code(grpc.StatusCode.NOT_FOUND)
+            context.set_details(f"failed to get user by id: {e}")
+            return proto.UserResponse()
+
     async def AddUser(
         self, request: proto.AddUserRequest, context: grpc.aio.ServicerContext
     ) -> proto.UserResponse:
