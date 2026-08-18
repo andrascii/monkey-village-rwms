@@ -21,6 +21,8 @@ from remnawave.models import (
     UserResponseDto,
     ActiveInternalSquadDto,
     HappCrypto,
+    CreateNodeRequestDto,
+    NodeConfigProfileRequestDto,
 )
 
 from config import Config
@@ -425,29 +427,115 @@ class Server(rwmanager_pb2_grpc.RwManager):
             context.set_details(f"failed to get inbounds: {e}")
             return proto.GetInboundsResponse()
 
+    @staticmethod
+    def _dto_to_proto_node(node) -> proto.Node:
+        # config_profile обязателен в DTO панели, но getattr оставлен для
+        # обратной совместимости тестов и старых версий SDK.
+        config_profile = getattr(node, "config_profile", None)
+        profile_uuid = (
+            str(config_profile.active_config_profile_uuid)
+            if config_profile is not None
+            and config_profile.active_config_profile_uuid is not None
+            else None
+        )
+        inbound_uuids = (
+            [str(inbound.uuid) for inbound in config_profile.active_inbounds]
+            if config_profile is not None
+            else []
+        )
+        return proto.Node(
+            uuid=str(node.uuid),
+            name=node.name,
+            address=node.address,
+            is_connected=node.is_connected,
+            is_disabled=node.is_disabled,
+            country_code=node.country_code,
+            config_profile_uuid=profile_uuid,
+            active_inbound_uuids=inbound_uuids,
+        )
+
     async def GetNodes(
         self, request: proto.Empty, context: grpc.aio.ServicerContext
     ) -> proto.GetNodesResponse:
         try:
             nodes = await self.__remnawave.nodes.get_all_nodes()
             return proto.GetNodesResponse(
-                nodes=[
-                    proto.Node(
-                        uuid=str(node.uuid),
-                        name=node.name,
-                        address=node.address,
-                        is_connected=node.is_connected,
-                        is_disabled=node.is_disabled,
-                        country_code=node.country_code,
-                    )
-                    for node in nodes
-                ]
+                nodes=[self._dto_to_proto_node(node) for node in nodes]
             )
         except ApiError as e:
             self.__logger.error(f"failed to get nodes: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"failed to get nodes: {e}")
             return proto.GetNodesResponse()
+
+    async def GetNodeSecret(
+        self, request: proto.Empty, context: grpc.aio.ServicerContext
+    ) -> proto.GetNodeSecretResponse:
+        try:
+            key = await self.__remnawave.keygen.generate_key()
+            # Сам ключ в лог не пишем: это секрет, которым нода
+            # аутентифицируется в панели.
+            self.__logger.info("node secret key issued")
+            return proto.GetNodeSecretResponse(secret_key=key.pub_key)
+        except ApiError as e:
+            self.__logger.error(f"failed to get node secret: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"failed to get node secret: {e}")
+            return proto.GetNodeSecretResponse()
+
+    async def CreateNode(
+        self, request: proto.CreateNodeRequest, context: grpc.aio.ServicerContext
+    ) -> proto.Node:
+        try:
+            self.__logger.info(
+                "create node: name=%s address=%s port=%s profile=%s",
+                request.name,
+                request.address,
+                request.port,
+                request.config_profile_uuid,
+            )
+            # Идемпотентность: повтор запроса (ретрай сайта после сбоя) не
+            # должен плодить дубликаты — существующая нода возвращается как
+            # есть и никогда не пересоздаётся (Remnawave Safety Rules).
+            existing_nodes = await self.__remnawave.nodes.get_all_nodes()
+            for node in existing_nodes:
+                if node.name == request.name or node.address == request.address:
+                    self.__logger.info(
+                        "create node: already exists uuid=%s name=%s address=%s",
+                        node.uuid,
+                        node.name,
+                        node.address,
+                    )
+                    return self._dto_to_proto_node(node)
+
+            created = await self.__remnawave.nodes.create_node(
+                CreateNodeRequestDto(
+                    name=request.name,
+                    address=request.address,
+                    port=request.port,
+                    country_code=(
+                        request.country_code
+                        if request.HasField("country_code")
+                        else "XX"
+                    ),
+                    config_profile=NodeConfigProfileRequestDto(
+                        activeConfigProfileUuid=request.config_profile_uuid,
+                        activeInbounds=list(request.inbound_uuids),
+                    ),
+                )
+            )
+            self.__logger.info(
+                "node created: uuid=%s name=%s address=%s",
+                created.uuid,
+                created.name,
+                created.address,
+            )
+            return self._dto_to_proto_node(created)
+        except ApiError as e:
+            self.__logger.error(f"failed to create node: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"failed to create node: {e}")
+            return proto.Node()
 
     async def GetNodeUsersUsage(
         self,
