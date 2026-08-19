@@ -152,6 +152,24 @@ def dto_to_proto_user(user: UserResponseDto) -> proto.UserResponse:
     return response
 
 
+
+def dto_to_proto_hwid_device(d) -> proto.HwidDevice:
+    dev = proto.HwidDevice(hwid=d.hwid)
+    if d.platform is not None:
+        dev.platform = d.platform
+    if d.os_version is not None:
+        dev.os_version = d.os_version
+    if d.device_model is not None:
+        dev.device_model = d.device_model
+    if d.user_agent is not None:
+        dev.user_agent = d.user_agent
+    if d.created_at is not None:
+        dev.created_at.CopyFrom(to_ts(d.created_at.replace(tzinfo=None)))
+    if d.updated_at is not None:
+        dev.updated_at.CopyFrom(to_ts(d.updated_at.replace(tzinfo=None)))
+    return dev
+
+
 class Server(rwmanager_pb2_grpc.RwManager):
     def __init__(self, config: Config):
         super().__init__()
@@ -467,6 +485,61 @@ class Server(rwmanager_pb2_grpc.RwManager):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"failed to get nodes: {e}")
             return proto.GetNodesResponse()
+
+
+    async def GetUserHwidDevices(
+        self,
+        request: proto.GetUserHwidDevicesRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> proto.GetUserHwidDevicesResponse:
+        try:
+            resp = await self.__remnawave.hwid.get_hwid_user(request.user_uuid)
+            self.__logger.info(
+                "hwid devices listed: user=%s total=%s",
+                request.user_uuid,
+                int(resp.total),
+            )
+            return proto.GetUserHwidDevicesResponse(
+                total=int(resp.total),
+                devices=[dto_to_proto_hwid_device(d) for d in resp.devices],
+            )
+        except ApiError as e:
+            self.__logger.error(
+                f"failed to get hwid devices for {request.user_uuid}: {e}"
+            )
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"failed to get hwid devices: {e}")
+            return proto.GetUserHwidDevicesResponse()
+
+    async def DeleteUserHwidDevice(
+        self,
+        request: proto.DeleteUserHwidDeviceRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> proto.DeleteUserHwidDeviceResponse:
+        try:
+            from remnawave.models import HWIDDeleteRequest
+
+            resp = await self.__remnawave.hwid.delete_hwid_to_user(
+                HWIDDeleteRequest(user_uuid=request.user_uuid, hwid=request.hwid)
+            )
+            self.__logger.info(
+                "hwid device deleted: user=%s hwid=%s left=%s",
+                request.user_uuid,
+                request.hwid,
+                int(resp.total),
+            )
+            return proto.DeleteUserHwidDeviceResponse(
+                total=int(resp.total),
+                devices=[dto_to_proto_hwid_device(d) for d in resp.devices],
+            )
+        except ApiError as e:
+            self.__logger.error(
+                f"failed to delete hwid device {request.hwid} "
+                f"for {request.user_uuid}: {e}"
+            )
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"failed to delete hwid device: {e}")
+            return proto.DeleteUserHwidDeviceResponse()
 
     async def GetNodeSecret(
         self, request: proto.Empty, context: grpc.aio.ServicerContext
