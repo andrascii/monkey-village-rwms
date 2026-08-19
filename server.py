@@ -27,6 +27,27 @@ from remnawave.models import (
 
 from config import Config
 
+# Прод-панель не включает userUuid в элементы ответа
+# /api/hwid/devices/{userUuid} (запрос и так сделан по uuid пользователя),
+# а модель SDK 2.7.1 требует это поле строго — pydantic падал с
+# ValidationError на каждом списке устройств. Поле нам не нужно, делаем
+# его опциональным прямо в модели SDK (версия запинена в requirements).
+from uuid import UUID as _UUID
+from remnawave.models.hwid import (
+    HwidDeviceDto as _HwidDeviceDto,
+    GetUserHwidDevicesResponseDto as _GetHwidResp,
+    DeleteUserHwidDeviceResponseDto as _DelHwidResp,
+    CreateUserHwidDeviceResponseDto as _CreateHwidResp,
+)
+
+_HwidDeviceDto.model_fields["user_uuid"].default = None
+_HwidDeviceDto.model_fields["user_uuid"].annotation = Optional[_UUID]
+_HwidDeviceDto.model_rebuild(force=True)
+# Родительские модели держат встроенную схему ребёнка — пересобираем и их
+_GetHwidResp.model_rebuild(force=True)
+_DelHwidResp.model_rebuild(force=True)
+_CreateHwidResp.model_rebuild(force=True)
+
 # Формат дат, который принимают эндпоинты /api/bandwidth-stats/* панели
 STATS_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S.000Z"
 
@@ -503,12 +524,12 @@ class Server(rwmanager_pb2_grpc.RwManager):
                 total=int(resp.total),
                 devices=[dto_to_proto_hwid_device(d) for d in resp.devices],
             )
-        except ApiError as e:
+        except (ApiError, Exception) as e:
             self.__logger.error(
-                f"failed to get hwid devices for {request.user_uuid}: {e}"
+                f"failed to get hwid devices for {request.user_uuid}: {e!r}"
             )
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"failed to get hwid devices: {e}")
+            context.set_details(f"failed to get hwid devices: {e!r}")
             return proto.GetUserHwidDevicesResponse()
 
     async def DeleteUserHwidDevice(
@@ -532,13 +553,13 @@ class Server(rwmanager_pb2_grpc.RwManager):
                 total=int(resp.total),
                 devices=[dto_to_proto_hwid_device(d) for d in resp.devices],
             )
-        except ApiError as e:
+        except (ApiError, Exception) as e:
             self.__logger.error(
                 f"failed to delete hwid device {request.hwid} "
-                f"for {request.user_uuid}: {e}"
+                f"for {request.user_uuid}: {e!r}"
             )
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"failed to delete hwid device: {e}")
+            context.set_details(f"failed to delete hwid device: {e!r}")
             return proto.DeleteUserHwidDeviceResponse()
 
     async def GetNodeSecret(
