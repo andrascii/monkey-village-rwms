@@ -125,6 +125,11 @@ website, payment, user-notify, rw-cleaner) обновлений не требу�
   (проксирует `GET /api/hwid/devices/{userUuid}` панели).
 - `DeleteUserHwidDevice(user_uuid, hwid)` — удаление одного устройства
   (проксирует `POST /api/hwid/devices/delete`); возвращает обновлённый список.
+- `GetHwidSettings(Empty)` — панельные настройки HWID (проксирует
+  `GET /api/subscription-settings`, блок `hwidSettings`): `enabled` и
+  `fallback_device_limit` — глобальный лимит устройств для подписок без
+  личного `hwid_device_limit`. Кабинет сайта показывает по нему реальный
+  лимит устройств.
 
 Подписки и лимиты этими методами не изменяются. Все вызовы логируются.
 После обновления proto пересобрать стабы: `./makepb.sh` (и в website-репо тоже).

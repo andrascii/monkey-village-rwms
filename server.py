@@ -562,6 +562,30 @@ class Server(rwmanager_pb2_grpc.RwManager):
             context.set_details(f"failed to delete hwid device: {e!r}")
             return proto.DeleteUserHwidDeviceResponse()
 
+    async def GetHwidSettings(
+        self, request: proto.Empty, context: grpc.aio.ServicerContext
+    ) -> proto.GetHwidSettingsResponse:
+        try:
+            settings = await self.__remnawave.subscriptions_settings.get_settings()
+            hwid = settings.hwid_settings
+            if hwid is None:
+                self.__logger.info("hwid settings requested: panel has none")
+                return proto.GetHwidSettingsResponse(enabled=False)
+            self.__logger.info(
+                "hwid settings requested: enabled=%s fallback_limit=%s",
+                hwid.enabled,
+                hwid.fallback_device_limit,
+            )
+            return proto.GetHwidSettingsResponse(
+                enabled=hwid.enabled,
+                fallback_device_limit=hwid.fallback_device_limit,
+            )
+        except (ApiError, Exception) as e:
+            self.__logger.error(f"failed to get hwid settings: {e!r}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"failed to get hwid settings: {e!r}")
+            return proto.GetHwidSettingsResponse()
+
     async def GetNodeSecret(
         self, request: proto.Empty, context: grpc.aio.ServicerContext
     ) -> proto.GetNodeSecretResponse:
