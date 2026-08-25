@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SSH_HOST="mv.fornex.tgbot"
+SSH_HOST="mv.fornex.app"
 REMOTE_DIR="/srv/monkey-village/rwms"
 IMAGE_TAR_NAME="rwms-amd64.tar"
 
