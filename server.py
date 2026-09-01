@@ -1,5 +1,6 @@
 import os
 import grpc
+import httpx
 import orjson
 import logging
 
@@ -14,7 +15,7 @@ from remnawave import RemnawaveSDK
 from remnawave.models import UserResponseDto
 
 from remnawave.enums import UserStatus, TrafficLimitStrategy
-from remnawave.exceptions import ApiError
+from remnawave.exceptions import ApiError, NetworkError, NotFoundError
 from remnawave.models import (
     CreateUserRequestDto,
     UpdateUserRequestDto,
@@ -174,6 +175,39 @@ def dto_to_proto_user(user: UserResponseDto) -> proto.UserResponse:
 
 
 
+def map_exception_to_grpc_code(e: Exception) -> grpc.StatusCode:
+    """
+    Единый маппинг исключений SDK Remnawave / httpx в gRPC-статусы.
+
+    Ключевое требование: «панель временно недоступна» должна быть отличима
+    от «ресурса не существует», иначе клиенты (бот, notifier, сайт)
+    показывают «подписка закончилась» при живой подписке.
+
+    - NOT_FOUND — только достоверный 404 от панели (ресурс действительно
+      отсутствует).
+    - UNAVAILABLE — транспортные сбои httpx (обрыв соединения, DNS,
+      таймауты, TLS, обрыв протокола): SDK не оборачивает исключения
+      httpx.AsyncClient.send(), они долетают сюда как есть. Сюда же —
+      remnawave NetworkError / ApiError(status_code=0, NETWORK_ERROR),
+      которым SDK оборачивает httpx.RequestError в _handle_response.
+    - INTERNAL — остальные ответы панели (500/502/429/401/409 и т.д.)
+      и любые неожиданные исключения.
+    """
+    if isinstance(e, ApiError):
+        # getattr — защита от неполно сконструированных ApiError
+        # (например, в тестах через ApiError.__new__).
+        status_code = getattr(e, "status_code", None)
+        if status_code == 404 or isinstance(e, NotFoundError):
+            return grpc.StatusCode.NOT_FOUND
+        if isinstance(e, NetworkError) or status_code == 0:
+            return grpc.StatusCode.UNAVAILABLE
+        return grpc.StatusCode.INTERNAL
+    # TimeoutException — подкласс TransportError, указан явно для ясности.
+    if isinstance(e, (httpx.TransportError, httpx.TimeoutException)):
+        return grpc.StatusCode.UNAVAILABLE
+    return grpc.StatusCode.INTERNAL
+
+
 def dto_to_proto_hwid_device(d) -> proto.HwidDevice:
     dev = proto.HwidDevice(hwid=d.hwid)
     if d.platform is not None:
@@ -197,12 +231,23 @@ class Server(rwmanager_pb2_grpc.RwManager):
         self.__config = config
         self.__logger = logging.getLogger(self.__class__.__name__)
 
+        # Токен панели в лог не пишем: это секрет с полным доступом
+        # к подпискам (Remnawave Safety Rules / Logging).
         self.__logger.info("remnawave base url: %s", self.__config.base_url)
-        self.__logger.info("remnawave token: %s", self.__config.token)
 
         self.__remnawave = RemnawaveSDK(
             base_url=self.__config.base_url, token=self.__config.token
         )
+
+    def _fail(self, context: grpc.aio.ServicerContext, operation: str, e: Exception):
+        """
+        Единообразно завершает RPC при ошибке: логирует, ставит gRPC-статус
+        по map_exception_to_grpc_code и детали без секретов.
+        """
+        code = map_exception_to_grpc_code(e)
+        self.__logger.error("%s: %s: %r", operation, code.name, e)
+        context.set_code(code)
+        context.set_details(f"{operation}: {e}")
 
     async def GetUserByUuid(
         self, request: proto.GetUserByUuidRequest, context: grpc.aio.ServicerContext
@@ -210,10 +255,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
         try:
             user = await self.__remnawave.users.get_user_by_uuid(request.uuid)
             return dto_to_proto_user(user)
-        except ApiError as e:
-            self.__logger.error(f"failed to get user by uuid: {e}")
-            context.set_code(grpc.StatusCode.NOT_FOUND)
-            context.set_details(f"failed to get user by uuid: {e}")
+        except Exception as e:
+            self._fail(context, "failed to get user by uuid", e)
             return proto.UserResponse()
 
     async def GetUserByUsername(
@@ -222,10 +265,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
         try:
             user = await self.__remnawave.users.get_user_by_username(request.username)
             return dto_to_proto_user(user)
-        except ApiError as e:
-            self.__logger.error(f"failed to get user by username: {e}")
-            context.set_code(grpc.StatusCode.NOT_FOUND)
-            context.set_details(f"failed to get user by username: {e}")
+        except Exception as e:
+            self._fail(context, "failed to get user by username", e)
             return proto.UserResponse()
 
     async def GetUserById(
@@ -234,10 +275,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
         try:
             user = await self.__remnawave.users.get_user_by_id(str(request.id))
             return dto_to_proto_user(user)
-        except ApiError as e:
-            self.__logger.error(f"failed to get user by id: {e}")
-            context.set_code(grpc.StatusCode.NOT_FOUND)
-            context.set_details(f"failed to get user by id: {e}")
+        except Exception as e:
+            self._fail(context, "failed to get user by id", e)
             return proto.UserResponse()
 
     async def AddUser(
@@ -278,8 +317,6 @@ class Server(rwmanager_pb2_grpc.RwManager):
                 )
                 return proto.UserResponse()
 
-            self.__logger.info(f"received request {request}")
-
             created_user = await self.__remnawave.users.create_user(
                 CreateUserRequestDto(
                     username=request.username,
@@ -288,9 +325,13 @@ class Server(rwmanager_pb2_grpc.RwManager):
                         request.telegram_id if request.HasField("telegram_id") else None
                     ),
                     expire_at=from_proto_timestamp(request.expire_at),
+                    # Message-поля proto3 всегда truthy, поэтому проверка
+                    # `if request.created_at` истинна и для незаданного поля,
+                    # а ToDatetime() тогда даёт 1970-01-01. Только HasField
+                    # отличает «не передано» от «передано».
                     created_at=(
                         from_proto_timestamp(request.created_at)
-                        if request.created_at
+                        if request.HasField("created_at")
                         else None
                     ),
                     status=status,
@@ -299,28 +340,36 @@ class Server(rwmanager_pb2_grpc.RwManager):
                         request.description if request.HasField("description") else None
                     ),
                     tag=request.tag if request.HasField("tag") else None,
-                    hwidDeviceLimit=(
+                    # Именно snake_case имя поля DTO: у SDK на поле навешан
+                    # serialization_alias="hwidDeviceLimit", который работает
+                    # только при сериализации; kwarg hwidDeviceLimit пайдантик
+                    # молча игнорирует (extra='ignore') и лимит терялся.
+                    hwid_device_limit=(
                         request.hwid_device_limit
                         if request.HasField("hwid_device_limit")
                         else None
                     ),
                     last_traffic_reset_at=(
                         from_proto_timestamp(request.last_traffic_reset_at)
-                        if request.last_traffic_reset_at
+                        if request.HasField("last_traffic_reset_at")
                         else None
                     ),
                     active_internal_squads=list(request.active_internal_squads),
                 )
             )
 
+            # Полный дамп юзера в лог запрещён: он содержит trojanPassword,
+            # ssPassword и vlessUuid — рабочие ключи подписки.
             self.__logger.info(
-                f"user created: {created_user.model_dump_json(by_alias=True)}"
+                "user created: username=%s uuid=%s expire_at=%s status=%s",
+                created_user.username,
+                created_user.uuid,
+                created_user.expire_at,
+                created_user.status,
             )
             return dto_to_proto_user(created_user)
-        except ApiError as e:
-            self.__logger.error(f"add user operation failed: {e}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"add user operation failed: {e}")
+        except Exception as e:
+            self._fail(context, "add user operation failed", e)
             return proto.UserResponse()
 
     async def DeleteUser(
@@ -332,10 +381,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
             self.__logger.info(f"delete user {request.uuid}")
             response = await self.__remnawave.users.delete_user(request.uuid)
             return proto.DeleteUserResponse(is_deleted=response.is_deleted)
-        except ApiError as e:
-            self.__logger.error(f"delete user operation failed: {e}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"delete user operation failed: {e}")
+        except Exception as e:
+            self._fail(context, "delete user operation failed", e)
             return proto.DeleteUserResponse(is_deleted=False)
 
     async def UpdateUser(
@@ -423,14 +470,18 @@ class Server(rwmanager_pb2_grpc.RwManager):
                 )
             )
 
+            # Полный дамп юзера в лог запрещён: он содержит trojanPassword,
+            # ssPassword и vlessUuid — рабочие ключи подписки.
             self.__logger.info(
-                f"user updated: {updated_user.model_dump_json(by_alias=True)}"
+                "user updated: username=%s uuid=%s expire_at=%s status=%s",
+                updated_user.username,
+                updated_user.uuid,
+                updated_user.expire_at,
+                updated_user.status,
             )
             return dto_to_proto_user(updated_user)
-        except ApiError as e:
-            self.__logger.error(f"update user operation failed: {e}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"update user operation failed: {e}")
+        except Exception as e:
+            self._fail(context, "update user operation failed", e)
             return proto.UserResponse()
 
     async def GetAllUsers(
@@ -448,10 +499,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
 
             response.users.extend(proto_user_list)
             return response
-        except ApiError as e:
-            self.__logger.error(f"failed to get all users: {e}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"failed to get all users: {e}")
+        except Exception as e:
+            self._fail(context, "failed to get all users", e)
             return proto.GetAllUsersReply()
 
     async def GetInbounds(
@@ -460,10 +509,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
         try:
             inbounds = await self.__remnawave.inbounds.get_inbounds()
             return proto.GetInboundsResponse(inbounds=inbounds)
-        except ApiError as e:
-            self.__logger.error(f"failed to get inbounds: {e}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"failed to get inbounds: {e}")
+        except Exception as e:
+            self._fail(context, "failed to get inbounds", e)
             return proto.GetInboundsResponse()
 
     @staticmethod
@@ -501,10 +548,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
             return proto.GetNodesResponse(
                 nodes=[self._dto_to_proto_node(node) for node in nodes]
             )
-        except ApiError as e:
-            self.__logger.error(f"failed to get nodes: {e}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"failed to get nodes: {e}")
+        except Exception as e:
+            self._fail(context, "failed to get nodes", e)
             return proto.GetNodesResponse()
 
 
@@ -524,12 +569,10 @@ class Server(rwmanager_pb2_grpc.RwManager):
                 total=int(resp.total),
                 devices=[dto_to_proto_hwid_device(d) for d in resp.devices],
             )
-        except (ApiError, Exception) as e:
-            self.__logger.error(
-                f"failed to get hwid devices for {request.user_uuid}: {e!r}"
+        except Exception as e:
+            self._fail(
+                context, f"failed to get hwid devices for {request.user_uuid}", e
             )
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"failed to get hwid devices: {e!r}")
             return proto.GetUserHwidDevicesResponse()
 
     async def DeleteUserHwidDevice(
@@ -553,13 +596,13 @@ class Server(rwmanager_pb2_grpc.RwManager):
                 total=int(resp.total),
                 devices=[dto_to_proto_hwid_device(d) for d in resp.devices],
             )
-        except (ApiError, Exception) as e:
-            self.__logger.error(
+        except Exception as e:
+            self._fail(
+                context,
                 f"failed to delete hwid device {request.hwid} "
-                f"for {request.user_uuid}: {e!r}"
+                f"for {request.user_uuid}",
+                e,
             )
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"failed to delete hwid device: {e!r}")
             return proto.DeleteUserHwidDeviceResponse()
 
     async def GetHwidSettings(
@@ -580,10 +623,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
                 enabled=hwid.enabled,
                 fallback_device_limit=hwid.fallback_device_limit,
             )
-        except (ApiError, Exception) as e:
-            self.__logger.error(f"failed to get hwid settings: {e!r}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"failed to get hwid settings: {e!r}")
+        except Exception as e:
+            self._fail(context, "failed to get hwid settings", e)
             return proto.GetHwidSettingsResponse()
 
     async def GetNodeSecret(
@@ -595,10 +636,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
             # аутентифицируется в панели.
             self.__logger.info("node secret key issued")
             return proto.GetNodeSecretResponse(secret_key=key.pub_key)
-        except ApiError as e:
-            self.__logger.error(f"failed to get node secret: {e}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"failed to get node secret: {e}")
+        except Exception as e:
+            self._fail(context, "failed to get node secret", e)
             return proto.GetNodeSecretResponse()
 
     async def CreateNode(
@@ -649,10 +688,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
                 created.address,
             )
             return self._dto_to_proto_node(created)
-        except ApiError as e:
-            self.__logger.error(f"failed to create node: {e}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"failed to create node: {e}")
+        except Exception as e:
+            self._fail(context, "failed to create node", e)
             return proto.Node()
 
     async def GetNodeUsersUsage(
@@ -685,8 +722,6 @@ class Server(rwmanager_pb2_grpc.RwManager):
                     for row in rows
                 ]
             )
-        except ApiError as e:
-            self.__logger.error(f"failed to get node users usage: {e}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"failed to get node users usage: {e}")
+        except Exception as e:
+            self._fail(context, "failed to get node users usage", e)
             return proto.GetNodeUsersUsageResponse()
