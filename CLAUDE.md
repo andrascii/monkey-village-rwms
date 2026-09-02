@@ -1,21 +1,18 @@
-# Monkey Island VPN
+# Monkey Village VPN
 
-Monkey Island VPN - это коммерческий VPN.
+Monkey Village VPN - это коммерческий VPN.
 
 ## Workspace Layout
 
 These paths describe my local workspace.
 When a task may affect another service, inspect the relevant service code before changing anything.
 
-- Telegram Bot: `/Users/apugachev/Work/projects/monkeyislandvpn/monkey-island-vpn-bot`
-- Website: `/Users/apugachev/Work/projects/monkeyislandvpn/monkey-island-website`
-- User Notify: `/Users/apugachev/Work/projects/monkeyislandvpn/monkey-island-user-notify`
-- RWMS: `/Users/apugachev/Work/projects/monkeyislandvpn/rwms`
-- YM-STAT: `/Users/apugachev/Work/projects/monkeyislandvpn/monkey-island-ym-stat`
-- RW Cleaner: `/Users/apugachev/Work/projects/monkeyislandvpn/monkey-island-rw-cleaner`
-- Payment: `/Users/apugachev/Work/projects/monkeyislandvpn/monkey-island-payment`
-- Email Service: `/Users/apugachev/Work/projects/monkeyislandvpn/monkey-island-email`
-- Custom Config: `/Users/apugachev/Work/projects/monkeyislandvpn/monkey-island-custom-config`
+- Telegram Bot: `/Users/apugachev/Work/projects/monkeyvillagevpn/monkey-village-vpn-bot`
+- User Notify: `/Users/apugachev/Work/projects/monkeyvillagevpn/monkey-village-notifier`
+- RWMS: `/Users/apugachev/Work/projects/monkeyvillagevpn/monkey-village-rwms`
+- YM-STAT: `/Users/apugachev/Work/projects/monkeyvillagevpn/monkey-village-ym-stat`
+- Payment: `/Users/apugachev/Work/projects/monkeyvillagevpn/monkey-village-wata-webhook`
+- Custom Config: `/Users/apugachev/Work/projects/monkeyvillagevpn/monkey-village-custom-config`
 
 ## Cross-Service Awareness
 
@@ -49,7 +46,7 @@ If another service depends on the changed behavior, inspect that service too and
 # Архитектурные правила
 
 ## Общие правила (самое важное)
-- Изменения в одном из микросервисов часто влекут за собой потребности в изменении других микросервисов, поэтому самое главное и важное правило, после любых изменений в любом из перечисленных микросервисов проекта Monkey Island (tg bot, user-notify, payment, website, rwms, ym-stat, rw-cleaner, payment, email, custom-config) в обязательном порядке надо проверить корректность работы всех остальных микросервисом. Будут ли новые правки работать согласованно со всеми остальными микросервисами, если же нет, то надо вносить правки и в соседние микросервисы для обеспечения работоспособности всего проекта в целом.
+- Изменения в одном из микросервисов часто влекут за собой потребности в изменении других микросервисов, поэтому самое главное и важное правило, после любых изменений в любом из перечисленных микросервисов проекта Monkey Village (tg bot, user-notify, payment, website, rwms, ym-stat, rw-cleaner, payment, email, custom-config) в обязательном порядке надо проверить корректность работы всех остальных микросервисом. Будут ли новые правки работать согласованно со всеми остальными микросервисами, если же нет, то надо вносить правки и в соседние микросервисы для обеспечения работоспособности всего проекта в целом.
 - Критически важно всегда проверять, что правки не приводят к случайному удалению данных из таблицы users (со всеми связанными с ней таблицами) и панели remnawave. Панель remnawave, которая хранит подписки пользоватейлей и управляется через RWMS сервис хранит самую важную и критически значимую часть бизнеса, недопустимо случано удалить оттуда какую-то подписку, если непредусмотрено иное (сервис rw-cleaner).
 - Всегда пиши тесты, покрывающие новую часть кода и если не хватает тестов на старую часть кода, обязательно дописывай их.
 
@@ -226,39 +223,3 @@ By default, never:
 unless the task explicitly requires it.
 
 Existing active client configurations must remain functional.
-
-### Allowed exception: RW Cleaner
-
-The `monkey-island-rw-cleaner` service is allowed to delete expired Remnawave subscriptions only when all of the following conditions are true:
-
-1. The subscription is expired.
-2. The expiration date is older than the configured retention period.
-3. The user has no active paid subscription.
-4. The deletion candidate was selected by the cleaner logic, not manually guessed.
-5. The operation is logged.
-6. The operation is safe to retry.
-7. A dry-run mode exists or is preserved.
-8. The service never deletes active, trial-active, paid-active, or recently expired subscriptions.
-
-When modifying `monkey-island-rw-cleaner`, always preserve safety checks that prevent accidental deletion of active subscriptions.
-
-## RW Cleaner Rules
-
-RW Cleaner is the only service that may delete expired subscriptions from Remnawave.
-
-It must be conservative.
-
-Required safety features:
-
-- configurable retention period
-- dry-run mode
-- structured logs for every deletion candidate
-- structured logs for every actual deletion
-- idempotent behavior
-- no deletion of active users
-- no deletion of recently expired users
-- no deletion when database state is ambiguous
-- no deletion when Remnawave state is ambiguous
-
-If there is any mismatch between PostgreSQL and Remnawave, do not delete automatically.
-Log the mismatch and skip the subscription.
