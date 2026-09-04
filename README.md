@@ -101,11 +101,36 @@ camelCase-kwarg `hwidDeviceLimit` pydantic молча игнорировал (у
 вправе сбрасывать вручную установленный лимит (лимиты ставятся вручную
 против абьюзеров).
 
+`traffic_limit_bytes` (поле 13, `optional int64`) передаётся в панель только
+если явно задан в запросе (`HasField`); не задан — подписка создаётся без
+лимита трафика, как раньше. Явный `0` тоже доезжает как `0` («без лимита»
+в терминах панели), отрицательное значение — `INVALID_ARGUMENT`. Поле
+используется антиабьюз-лимитом новых пробных подписок (настройки сайта
+`trial_traffic_limit_enabled` / `trial_traffic_limit_gb` /
+`trial_traffic_limit_strategy`): байты = `round(ГиБ * 1024**3)`.
+
+`traffic_limit_strategy` при создании: незаданное поле читается как
+`NO_RESET` (значение 0 в proto3, совпадает с дефолтом DTO SDK) — это
+прежнее поведение, оно сохранено намеренно.
+
 ## Семантика UpdateUser
 
-Опциональные скалярные поля (`status`, `email`, `expire_at`, `telegram_id` и
-т.д.), не заданные в запросе, в PATCH к панели не попадают и значений не
-сбрасывают.
+Опциональные скалярные поля (`status`, `email`, `expire_at`, `telegram_id`,
+`traffic_limit_bytes`, `traffic_limit_strategy` и т.д.), не заданные в
+запросе, в PATCH к панели не попадают и значений не сбрасывают.
+
+`traffic_limit_strategy` — багфикс (антиабьюз, 2026-09): раньше стратегия
+передавалась в PATCH всегда, и незаданное поле (0 = `NO_RESET` в proto3)
+перезаписывало стратегию сброса в панели при каждом продлении/обновлении.
+Теперь она передаётся только при `HasField("traffic_limit_strategy")`.
+Вызывающим, которым нужно именно сбросить стратегию (снятие лимита пробной
+подписки после оплаты), надо передавать `NO_RESET` явно — все текущие
+платёжные пути (bot, website, payment, user-notify) так и делают.
+Отрицательный `traffic_limit_bytes` — `INVALID_ARGUMENT`.
+
+Снятие лимита трафика «как было»: `UpdateUser(uuid, traffic_limit_bytes=0,
+traffic_limit_strategy=NO_RESET, status=ACTIVE)` без `active_internal_squads`
+(см. ниже: пустой список сквады не трогает, поэтому ban-сквад не снимается).
 
 `active_internal_squads` — repeated-поле без признака «не задано»: пустой список
 трактуется как «сквады не менять» (поле исключается из PATCH). Стереть все
@@ -200,3 +225,40 @@ website, payment, user-notify, rw-cleaner) обновлений не требу�
 
 Подписки и лимиты этими методами не изменяются. Все вызовы логируются.
 После обновления proto пересобрать стабы: `./makepb.sh` (и в website-репо тоже).
+
+## Лимит трафика и стратегии сброса (2026-09, антиабьюз)
+
+Аддитивные изменения proto (номера и имена существующих полей не менялись):
+
+- `enum TrafficLimitStrategy` += `MONTH_ROLLING = 4` — «ежемесячно по дате
+  создания подписки», как в панели Remnawave. Маппинг proto <-> SDK знает
+  это значение в обе стороны; раньше любой `Get*`/`GetAllUsers` по
+  пользователю с такой стратегией в панели падал с `ValueError` ->
+  `INTERNAL`.
+- `AddUserRequest` += `optional int64 traffic_limit_bytes = 13` — лимит
+  трафика при создании, см. «Семантика AddUser».
+- `UpdateUser` передаёт `traffic_limit_strategy` только при `HasField`,
+  см. «Семантика UpdateUser».
+
+Лимит и стратегия попадают в компактный лог создания/обновления
+(`traffic_limit_bytes=... traffic_limit_strategy=...`) — секретов там
+по-прежнему нет. Покрытие: `tests/test_traffic_limit.py`.
+
+Перегенерация стабов у потребителей (каждый — своим пиновым `.venv`,
+чтобы gencode-версия `rwmanager_pb2.py` совпадала; тулчейн у всех
+запинен на `grpcio-tools==1.81.1` / `protobuf==6.33.6`):
+
+```bash
+PATH="$PWD/.venv/bin:$PATH" ./makepb.sh                    # rwms
+for d in ../monkey-village-website ../monkey-village-vpn-bot \
+         ../monkey-village-notifier ../monkey-village-wata-webhook \
+         ../monkey-village-rw-cleaner; do
+  cp proto/rwmanager.proto "$d/proto/rwmanager.proto"
+  (cd "$d" && PATH="$PWD/.venv/bin:$PATH" ./makepb.sh)
+done
+md5 ../monkey-village-*/proto/rwmanager_pb2.py             # у потребителей одинаковы
+```
+
+`rwmanager_pb2.py` в rwms отличается от потребительского только путём
+источника в дескрипторе (`-Iproto` против `-I.`), поэтому md5 сравнивать
+между потребителями, а не с rwms.

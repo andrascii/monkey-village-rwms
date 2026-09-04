@@ -97,6 +97,32 @@ def RemnawaveTrafficLimitStrategyToProto(
         return proto.TrafficLimitStrategy.WEEK
     elif strategy == TrafficLimitStrategy.MONTH:
         return proto.TrafficLimitStrategy.MONTH
+    elif strategy == TrafficLimitStrategy.MONTH_ROLLING:
+        # Без этой ветки любой Get*/GetAllUsers по пользователю со
+        # стратегией MONTH_ROLLING в панели падал с ValueError -> INTERNAL.
+        return proto.TrafficLimitStrategy.MONTH_ROLLING
+    else:
+        raise ValueError(f"Invalid traffic limit strategy: {strategy}")
+
+
+def ProtoTrafficLimitStrategyToRemnawave(
+    strategy: proto.TrafficLimitStrategy,
+) -> TrafficLimitStrategy:
+    """
+    Обратный маппинг: proto TrafficLimitStrategy -> enum SDK Remnawave.
+    Неизвестное значение (например, от клиента с более новым proto)
+    даёт ValueError, хендлеры переводят его в INVALID_ARGUMENT.
+    """
+    if strategy == proto.TrafficLimitStrategy.NO_RESET:
+        return TrafficLimitStrategy.NO_RESET
+    elif strategy == proto.TrafficLimitStrategy.DAY:
+        return TrafficLimitStrategy.DAY
+    elif strategy == proto.TrafficLimitStrategy.WEEK:
+        return TrafficLimitStrategy.WEEK
+    elif strategy == proto.TrafficLimitStrategy.MONTH:
+        return TrafficLimitStrategy.MONTH
+    elif strategy == proto.TrafficLimitStrategy.MONTH_ROLLING:
+        return TrafficLimitStrategy.MONTH_ROLLING
     else:
         raise ValueError(f"Invalid traffic limit strategy: {strategy}")
 
@@ -299,21 +325,32 @@ class Server(rwmanager_pb2_grpc.RwManager):
                 context.set_details(f"invalid user status: {request.status}")
                 return proto.UserResponse()
 
-            if request.traffic_limit_strategy == proto.TrafficLimitStrategy.NO_RESET:
-                traffic_limit_strategy = TrafficLimitStrategy.NO_RESET
-            elif request.traffic_limit_strategy == proto.TrafficLimitStrategy.DAY:
-                traffic_limit_strategy = TrafficLimitStrategy.DAY
-            elif request.traffic_limit_strategy == proto.TrafficLimitStrategy.WEEK:
-                traffic_limit_strategy = TrafficLimitStrategy.WEEK
-            elif request.traffic_limit_strategy == proto.TrafficLimitStrategy.MONTH:
-                traffic_limit_strategy = TrafficLimitStrategy.MONTH
-            else:
+            # Незаданная стратегия в proto3 читается как 0 = NO_RESET — при
+            # создании это допустимо и совпадает с дефолтом DTO SDK.
+            try:
+                traffic_limit_strategy = ProtoTrafficLimitStrategyToRemnawave(
+                    request.traffic_limit_strategy
+                )
+            except ValueError:
                 self.__logger.error(
                     f"invalid traffic limit strategy: {request.traffic_limit_strategy}"
                 )
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details(
                     f"invalid traffic limit strategy: {request.traffic_limit_strategy}"
+                )
+                return proto.UserResponse()
+
+            if (
+                request.HasField("traffic_limit_bytes")
+                and request.traffic_limit_bytes < 0
+            ):
+                self.__logger.error(
+                    f"invalid traffic limit bytes: {request.traffic_limit_bytes}"
+                )
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(
+                    f"invalid traffic limit bytes: {request.traffic_limit_bytes}"
                 )
                 return proto.UserResponse()
 
@@ -336,6 +373,14 @@ class Server(rwmanager_pb2_grpc.RwManager):
                     ),
                     status=status,
                     traffic_limit_strategy=traffic_limit_strategy,
+                    # Лимит трафика при создании (антиабьюз пробных подписок):
+                    # только при явно заданном поле, иначе панель создаёт
+                    # подписку без лимита, как раньше.
+                    traffic_limit_bytes=(
+                        request.traffic_limit_bytes
+                        if request.HasField("traffic_limit_bytes")
+                        else None
+                    ),
                     description=(
                         request.description if request.HasField("description") else None
                     ),
@@ -361,11 +406,14 @@ class Server(rwmanager_pb2_grpc.RwManager):
             # Полный дамп юзера в лог запрещён: он содержит trojanPassword,
             # ssPassword и vlessUuid — рабочие ключи подписки.
             self.__logger.info(
-                "user created: username=%s uuid=%s expire_at=%s status=%s",
+                "user created: username=%s uuid=%s expire_at=%s status=%s "
+                "traffic_limit_bytes=%s traffic_limit_strategy=%s",
                 created_user.username,
                 created_user.uuid,
                 created_user.expire_at,
                 created_user.status,
+                created_user.traffic_limit_bytes,
+                created_user.traffic_limit_strategy,
             )
             return dto_to_proto_user(created_user)
         except Exception as e:
@@ -407,21 +455,35 @@ class Server(rwmanager_pb2_grpc.RwManager):
                 context.set_details(f"invalid user status: {request.status}")
                 return proto.UserResponse()
 
-            if request.traffic_limit_strategy == proto.TrafficLimitStrategy.NO_RESET:
-                traffic_limit_strategy = TrafficLimitStrategy.NO_RESET
-            elif request.traffic_limit_strategy == proto.TrafficLimitStrategy.DAY:
-                traffic_limit_strategy = TrafficLimitStrategy.DAY
-            elif request.traffic_limit_strategy == proto.TrafficLimitStrategy.WEEK:
-                traffic_limit_strategy = TrafficLimitStrategy.WEEK
-            elif request.traffic_limit_strategy == proto.TrafficLimitStrategy.MONTH:
-                traffic_limit_strategy = TrafficLimitStrategy.MONTH
-            else:
+            # Стратегия сброса — только если поле явно задано. Раньше она
+            # передавалась всегда, и незаданное поле (0 = NO_RESET в proto3)
+            # перезаписывало стратегию в панели при каждом продлении.
+            traffic_limit_strategy = None
+            if request.HasField("traffic_limit_strategy"):
+                try:
+                    traffic_limit_strategy = ProtoTrafficLimitStrategyToRemnawave(
+                        request.traffic_limit_strategy
+                    )
+                except ValueError:
+                    self.__logger.error(
+                        f"invalid traffic limit strategy: {request.traffic_limit_strategy}"
+                    )
+                    context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                    context.set_details(
+                        f"invalid traffic limit strategy: {request.traffic_limit_strategy}"
+                    )
+                    return proto.UserResponse()
+
+            if (
+                request.HasField("traffic_limit_bytes")
+                and request.traffic_limit_bytes < 0
+            ):
                 self.__logger.error(
-                    f"invalid traffic limit strategy: {request.traffic_limit_strategy}"
+                    f"invalid traffic limit bytes: {request.traffic_limit_bytes}"
                 )
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details(
-                    f"invalid traffic limit strategy: {request.traffic_limit_strategy}"
+                    f"invalid traffic limit bytes: {request.traffic_limit_bytes}"
                 )
                 return proto.UserResponse()
 
@@ -434,6 +496,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
                         if request.HasField("traffic_limit_bytes")
                         else None
                     ),
+                    # None (поле не задано) exclude_none убирает из PATCH,
+                    # стратегия в панели остаётся прежней.
                     traffic_limit_strategy=traffic_limit_strategy,
                     expire_at=(
                         from_proto_timestamp(request.expire_at)
@@ -473,11 +537,14 @@ class Server(rwmanager_pb2_grpc.RwManager):
             # Полный дамп юзера в лог запрещён: он содержит trojanPassword,
             # ssPassword и vlessUuid — рабочие ключи подписки.
             self.__logger.info(
-                "user updated: username=%s uuid=%s expire_at=%s status=%s",
+                "user updated: username=%s uuid=%s expire_at=%s status=%s "
+                "traffic_limit_bytes=%s traffic_limit_strategy=%s",
                 updated_user.username,
                 updated_user.uuid,
                 updated_user.expire_at,
                 updated_user.status,
+                updated_user.traffic_limit_bytes,
+                updated_user.traffic_limit_strategy,
             )
             return dto_to_proto_user(updated_user)
         except Exception as e:
