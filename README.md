@@ -3,8 +3,8 @@
 gRPC-сервис управления пользователями Remnawave-панели (Remnawave Manager
 Service). Проксирует операции над подписками (создание, обновление, получение,
 удаление) через Remnawave SDK. API описан в `proto/rwmanager.proto`; потребители
-(bot, website, payment, user-notify, rw-cleaner) держат собственные копии
-сгенерированных стабов (`makepb.sh`).
+(bot, website, payment, user-notify, rw-cleaner, ip-guard) держат собственные
+копии сгенерированных стабов (`makepb.sh`).
 
 ## Переменные окружения
 
@@ -252,7 +252,7 @@ website, payment, user-notify, rw-cleaner) обновлений не требу�
 PATH="$PWD/.venv/bin:$PATH" ./makepb.sh                    # rwms
 for d in ../monkey-village-website ../monkey-village-vpn-bot \
          ../monkey-village-notifier ../monkey-village-wata-webhook \
-         ../monkey-village-rw-cleaner; do
+         ../monkey-village-rw-cleaner ../monkey-village-ip-guard; do
   cp proto/rwmanager.proto "$d/proto/rwmanager.proto"
   (cd "$d" && PATH="$PWD/.venv/bin:$PATH" ./makepb.sh)
 done
@@ -261,4 +261,7 @@ md5 ../monkey-village-*/proto/rwmanager_pb2.py             # у потребит
 
 `rwmanager_pb2.py` в rwms отличается от потребительского только путём
 источника в дескрипторе (`-Iproto` против `-I.`), поэтому md5 сравнивать
-между потребителями, а не с rwms.
+между потребителями, а не с rwms. ip-guard — полноценный потребитель
+(`GetUserById`, `GetUserHwidDevices` для алертов по подсетям) со своими
+`proto/rwmanager_pb2*.py` и `makepb.sh`; если пропустить его в цикле, его
+стабы разойдутся с остальными.
