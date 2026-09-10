@@ -10,6 +10,7 @@ import rwmanager_pb2_grpc
 from typing import Optional
 from datetime import datetime, timezone
 from google.protobuf.timestamp_pb2 import Timestamp
+from pydantic import ValidationError
 
 from remnawave import RemnawaveSDK
 from remnawave.models import UserResponseDto
@@ -216,6 +217,12 @@ def map_exception_to_grpc_code(e: Exception) -> grpc.StatusCode:
       httpx.AsyncClient.send(), они долетают сюда как есть. Сюда же —
       remnawave NetworkError / ApiError(status_code=0, NETWORK_ERROR),
       которым SDK оборачивает httpx.RequestError в _handle_response.
+    - INVALID_ARGUMENT — ставится ЯВНО в хендлерах (невалидный статус,
+      стратегия, отрицательный лимит, а также pydantic ValidationError при
+      сборке DTO запроса — см. build_request_dto). Здесь его нет намеренно:
+      SDK валидирует через pydantic и ОТВЕТЫ панели тоже, поэтому общая
+      ветка по типу исключения выдавала бы «запрос невалиден, повтор не
+      поможет» на уже применённую мутацию, ответ которой не разобрался.
     - INTERNAL — остальные ответы панели (500/502/429/401/409 и т.д.)
       и любые неожиданные исключения.
     """
@@ -354,8 +361,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
                 )
                 return proto.UserResponse()
 
-            created_user = await self.__remnawave.users.create_user(
-                CreateUserRequestDto(
+            try:
+                create_dto = CreateUserRequestDto(
                     username=request.username,
                     email=request.email if request.HasField("email") else None,
                     telegram_id=(
@@ -401,7 +408,20 @@ class Server(rwmanager_pb2_grpc.RwManager):
                     ),
                     active_internal_squads=list(request.active_internal_squads),
                 )
-            )
+            except ValidationError as e:
+                # Запрос собран вызывающим кодом неверно (например, email не
+                # проходит EmailStr): панели он НЕ отправлялся, повтор с тем же
+                # запросом не пройдёт никогда. Отвечаем INVALID_ARGUMENT, чтобы
+                # клиент мог отличить это от «панель временно недоступна».
+                # Ветка стоит только вокруг сборки DTO ЗАПРОСА: SDK валидирует
+                # через pydantic и ОТВЕТЫ панели, а там та же ошибка означала бы
+                # уже применённую мутацию — её хоронить нельзя.
+                self.__logger.error("add user request is invalid: %r", e)
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(f"add user request is invalid: {e}")
+                return proto.UserResponse()
+
+            created_user = await self.__remnawave.users.create_user(create_dto)
 
             # Полный дамп юзера в лог запрещён: он содержит trojanPassword,
             # ssPassword и vlessUuid — рабочие ключи подписки.
@@ -487,8 +507,8 @@ class Server(rwmanager_pb2_grpc.RwManager):
                 )
                 return proto.UserResponse()
 
-            updated_user = await self.__remnawave.users.update_user(
-                UpdateUserRequestDto(
+            try:
+                update_dto = UpdateUserRequestDto(
                     uuid=request.uuid,
                     status=status if request.HasField("status") else None,
                     traffic_limit_bytes=(
@@ -532,7 +552,20 @@ class Server(rwmanager_pb2_grpc.RwManager):
                         else None
                     ),
                 )
-            )
+            except ValidationError as e:
+                # Запрос собран вызывающим кодом неверно (например, email не
+                # проходит EmailStr): панели он НЕ отправлялся, повтор с тем же
+                # запросом не пройдёт никогда. Отвечаем INVALID_ARGUMENT, чтобы
+                # клиент мог отличить это от «панель временно недоступна».
+                # Ветка стоит только вокруг сборки DTO ЗАПРОСА: SDK валидирует
+                # через pydantic и ОТВЕТЫ панели, а там та же ошибка означала бы
+                # уже применённую мутацию — её хоронить нельзя.
+                self.__logger.error("update user request is invalid: %r", e)
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(f"update user request is invalid: {e}")
+                return proto.UserResponse()
+
+            updated_user = await self.__remnawave.users.update_user(update_dto)
 
             # Полный дамп юзера в лог запрещён: он содержит trojanPassword,
             # ssPassword и vlessUuid — рабочие ключи подписки.
