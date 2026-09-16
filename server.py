@@ -705,6 +705,36 @@ class Server(rwmanager_pb2_grpc.RwManager):
             )
             return proto.DeleteUserHwidDeviceResponse()
 
+    async def RevokeUserSubscription(
+        self,
+        request: proto.RevokeUserSubscriptionRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> proto.UserResponse:
+        """Перевыпуск подписки по явному действию владельца в кабинете.
+
+        Тело запроса к панели пустое: она сама генерирует новый short_uuid и
+        новые credentials (vless uuid / trojan / ss). Срок, статус, сквады и
+        лимиты не меняются. Логируем uuid и смену short_uuid — без ссылок.
+        """
+        if not request.uuid:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("uuid is required")
+            return proto.UserResponse()
+        try:
+            user = await self.__remnawave.users.revoke_user_subscription(
+                request.uuid
+            )
+            self.__logger.info(
+                "subscription revoked by owner: uuid=%s short_uuid=%s revoked_at=%s",
+                request.uuid,
+                user.short_uuid,
+                user.sub_revoked_at,
+            )
+            return dto_to_proto_user(user)
+        except Exception as e:
+            self._fail(context, f"failed to revoke subscription {request.uuid}", e)
+            return proto.UserResponse()
+
     async def GetHwidSettings(
         self, request: proto.Empty, context: grpc.aio.ServicerContext
     ) -> proto.GetHwidSettingsResponse:
